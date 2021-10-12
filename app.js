@@ -1,48 +1,59 @@
 const axios = require('axios');
 const logger = require('./logger');
-const csv = require('csv-parser');
-const fs = require('fs');
-const rl = require("readline");
+var fs = require('fs').promises;
+var fs1 = require('fs');
+var path = require('path');
+var parse = require('csv-parse/lib/sync');
+var stringify = require('csv-stringify');
+const data_function = require('./data_function');
 require('dotenv').config()
 const url_sever = process.env.URL_SERVER;
 const messages_list = process.env.MESSAGES_LIST;
 
+
 let start = async () => {
     try {
+        //Check if the file exists
+        if (!fs1.existsSync(messages_list))throw new Error('The file does not exist');
 
-        var data = fs.readFileSync(messages_list, "utf8").split("\r\n");
-        var arr_title = ['message','to_name','from_name','key'];
-        var csv_change = [];
-        csv_change = data;
+        const fileContent = await fs.readFile(messages_list);// Csv file reading
+        const arr_title = ['message', 'to_name', 'from_name', 'key'];
+        const csv_change = parse(fileContent, {});
 
-        for (let i in csv_change) { // SPLIT ROWS
-            csv_change[i] = csv_change[i].split(",");
-/*             for (let j in csv_change[i]) { // SPLIT COLUMNS
-                csv_change[i][j] = csv_change[i][j].split(",");
-            } */
+        const title_csv = csv_change[0].map(i => i.toLowerCase());
+
+        //Checking the correctness of the title
+        if (!(title_csv.length == arr_title.length && title_csv.every((v) => arr_title.indexOf(v) >= 0))) {
+            throw new Error('Title fields are incorrect');
         }
-        //console.log(csv_change);
 
-        for (let i in csv_change) { 
+        for (let i in csv_change) {
             try {
-                if (csv_change[i] == arr_title || csv_change[i] == '') {
-                } else {
-                    if (csv_change[i].length == 4) {   //if there is key = update the message!
-                        try {
-                            let response = await axios.get(url_sever + '/' + `${csv_change[i][3]}`)  //GET call -select message by key
-                            //.then(function (response) {
-                            //})
-                            if (response.data.payload != "") {
-                                logger.info('The message was found');
-                                update_message(csv_change[i][0],csv_change[i][3]);
+                if (csv_change[i] != '') {
+                    if (csv_change[i][3]) {   //if there is key = update the message!
+
+                        //Checking the correctness of the key
+                        if (csv_change[i][3].match(/^[0-9a-z]+$/) && csv_change[i][3].length == 4) {
+                            try {
+                                let response = await axios.get(url_sever + '/' + `${csv_change[i][3]}`)  //GET call -select message by key
+
+                                if (response.data.payload != "") {
+                                    logger.info('The message was found');
+                                    await data_function.update_message(csv_change[i][0], csv_change[i][3]);  //Update message func
+                                } else {
+                                    logger.error('The message was not found');
+                                }
+                            } catch (error) {
+                                logger.error(error.message);
                             }
-                        } catch (error) {
-                            logger.error(error.message);
+                        } else {
+                            logger.error('The key is incorrect');
                         }
+
                     } else {   //Otherwise create the message!
-                        var return_key = await insert_message(csv_change[i][1], csv_change[i][2], csv_change[i][0]);
-                        if (return_key != "") {
-                            csv_change[i][3] = return_key;
+                        var return_key = await data_function.insert_message(csv_change[i][1], csv_change[i][2], csv_change[i][0]);
+                        if (return_key != null) {
+                            csv_change[i][3] = return_key;  //Update the returned key
                         }
                     }
                 }
@@ -54,16 +65,11 @@ let start = async () => {
         logger.info('CSV file successfully processed');
         console.log('CSV file successfully processed');
 
-        //console.log(csv_change);
-         fs.writeFileSync(messages_list, '', function (err) {
-            if (err) return console.log(err);
-        });
-        for (let i in csv_change) {
-            fs.appendFileSync(messages_list, `${csv_change[i]}\r\n`, function (err) {
-                if (err) return console.log(err);
-            });
-        } 
-        //console.log(csv_change);
+        stringify(csv_change, {  //Update the csv file
+            //header: true
+        }, function (err, output) {
+            fs.writeFile(messages_list, output);
+        })
 
     } catch (error) {
         logger.error(error.message);
@@ -72,37 +78,3 @@ let start = async () => {
 
 start();
 
-let insert_message = async (from_name, to_name, message) => {
-    try {
-        //console.log(from_name, to_name, message);
-        let response = await axios.post(url_sever, {        //POST call -create message
-            FROM_NAME: from_name,
-            TO_NAME: to_name,
-            MESSAGE: message
-        });
-        if (response.data.key) {
-            logger.info(response.data.message);
-            //console.log(response.data.key);
-            return response.data.key;
-        } else {
-            if (response.data.status == 'fail') logger.error(response.data.message);
-        }
-
-    } catch (error) {
-        logger.error(error.message);
-    }
-};
-
-
-let update_message = async (message,key) => {
-    try {
-        let response = await axios.get(url_sever + '/update/' + `${key}`+'/'+`${message}`);  //UPDATE call -update message by key
-        if (response.data.status == 'ok') {
-            logger.info('Message updated');
-        } else {
-            if (response.data.status == 'fail') logger.error(response.data.message);
-        }
-    } catch (error) {
-        logger.error(error.message);
-    }
-};
