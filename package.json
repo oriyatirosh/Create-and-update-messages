@@ -11,7 +11,6 @@
   "dependencies": {
     "axios": "^0.22.0",
     "config": "^3.3.6",
-    "csv-parser": "^3.0.0",
     "dotenv": "^10.0.0",
     "winston": "^3.3.3"
   },
